@@ -11,6 +11,7 @@ import type {
   Action,
   ActionResult,
   BrowserState,
+  CaptureRequestMessage,
   ElementMeta,
   ExecuteRequestMessage,
   ExecuteResponseMessage,
@@ -109,6 +110,19 @@ function isExecuteRequest(message: unknown): message is ExecuteRequestMessage {
   return isPrivisMessage(message) && message.type === "execute.request";
 }
 
+function isCaptureRequest(message: unknown): message is CaptureRequestMessage {
+  return isPrivisMessage(message) && message.type === "capture.request";
+}
+
+// Capture channel for the Capture Layer: returns the DOM package (elements +
+// browser state) to the background on request. Wired by the orchestrator (#15);
+// the background half lives in background/service-worker.ts.
+chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
+  if (!isCaptureRequest(message)) return false;
+  sendResponse({ type: "capture.response", payload: captureDom() });
+  return false;
+});
+
 async function executeActions(actions: Action[]): Promise<ExecuteResponseMessage> {
   const results: ActionResult[] = [];
   for (const action of actions) {
@@ -119,8 +133,8 @@ async function executeActions(actions: Action[]): Promise<ExecuteResponseMessage
   return { type: "execute.response", payload: { results } };
 }
 
-// Execute channel for the Local Executor. The capture.request channel lands with
-// the orchestrator issue (#15) — capture is out of scope here.
+// Execute channel for the Local Executor: applies gate-approved actions to the
+// real page DOM and replies with per-action results (stops on first failure).
 chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
   if (isPrivisMessage(message) && message.type === "capture.request") {
     try {

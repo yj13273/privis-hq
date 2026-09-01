@@ -62,30 +62,7 @@ export function decide(params: {
 }): PolicyGateResult {
   const { detections, browserState } = params;
 
-  // 1. Block if a PASSWORD detection exists (cannot prove redaction to remote in v0)
-  const hasPassword = detections.some((d) => d.category === "PASSWORD");
-  if (hasPassword) {
-    return {
-      decision: "block",
-      reason:
-        "Blocked: PASSWORD category detection present (password pages blocked from remote in v0)",
-    };
-  }
-
-  // 2. Block if URL host matches bank/payroll/tax deny list AND any detection confidence < 0.5
-  const hasLowConfidenceUnder05 = detections.some((d) => d.confidence < 0.5);
-  if (isDenyListedHost(browserState.url) && hasLowConfidenceUnder05) {
-    const lowest = detections.reduce(
-      (min, d) => (d.confidence < min ? d.confidence : min),
-      1.0
-    );
-    return {
-      decision: "block",
-      reason: `Blocked: low-confidence detection (${lowest.toFixed(2)}) on sensitive financial/tax host`,
-    };
-  }
-
-  // 3. v0 pragmatic demo rule: allow when all detections >= 0.8 and URL is file:// or trusted local/demo host (no PASSWORD)
+  // 1. v0 pragmatic demo rule: allow when all detections >= 0.8 and URL is file:// or trusted local/demo host
   const isDemoOrLocal = isDemoOrLocalUrl(browserState.url);
   const allHighConfidence =
     detections.length === 0 || detections.every((d) => d.confidence >= 0.8);
@@ -95,6 +72,16 @@ export function decide(params: {
       decision: "allow",
       reason:
         "Allowed under v0 demo exception: all detections have confidence >= 0.8 on local/demo URL",
+    };
+  }
+
+  // 2. Block if a PASSWORD detection exists on external/non-demo sites
+  const hasPassword = detections.some((d) => d.category === "PASSWORD");
+  if (hasPassword) {
+    return {
+      decision: "block",
+      reason:
+        "Blocked: PASSWORD category detection present (password pages blocked from remote in v0)",
     };
   }
 

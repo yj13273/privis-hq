@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PRIVIS HUD</title>
+    <link rel="stylesheet" href="hud.css" />
+  </head>
+  <body>
+    <header class="hud-header">
+      <div class="hud-title">
+        <span class="hud-logo">PRIVIS</span>
+        <span class="hud-tagline">local eyes · local eraser · remote brain</span>
+      </div>
+      <div class="hud-buttons">
+        <button id="run-live" class="hud-btn" type="button" style="background:#0284c7;color:#fff;font-weight:600;margin-right:6px;">⚡ Run Live</button>
+        <button id="play-fixture" class="hud-btn" type="button">▶ Play fixture</button>
+      </div>
+    </header>
+
+    <main id="pipeline" class="hud-pipeline" aria-live="polite">
+      <p class="hud-idle">One step of the pipeline, shown as it runs.<br />
+        Playback uses <code>fixtures/</code> (synthetic data only) until the
+        orchestrator wires live events.</p>
+    </main>
+
+    <footer class="hud-footer">
+      Screenshot and mapping table stay in memory on this device. The Remote
+      Agent sees only placeholders and redacted pixels.
+    </footer>
+
+    <template id="step-template">
+      <section class="hud-step">
+        <div class="hud-step-head">
+          <span class="hud-step-num"></span>
+          <span class="hud-step-name"></span>
+        </div>
+        <div class="hud-step-body"></div>
+      </section>
+    </template>
+
+    <script src="hud.js"></script>
+  </body>
+</html>

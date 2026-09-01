@@ -118,6 +118,7 @@ export function isPrivisMessage(message: unknown): message is PrivisMessage {
 
 /**
  * Sends a message from the background service worker to a specific tab's content script.
+ * Auto-injects content scripts if the tab was open before an extension reload.
  * @param tabId Target tab ID
  * @param message Message payload
  */
@@ -128,7 +129,28 @@ export async function sendToContent<T = unknown>(tabId: number, message: PrivisM
   if (typeof chrome === "undefined" || !chrome.tabs?.sendMessage) {
     throw new Error("chrome.tabs.sendMessage is not available");
   }
-  return chrome.tabs.sendMessage(tabId, message) as Promise<T>;
+  try {
+    return (await chrome.tabs.sendMessage(tabId, message)) as T;
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    if (
+      errorMsg.includes("Could not establish connection") &&
+      typeof chrome.scripting?.executeScript === "function"
+    ) {
+      // Auto-inject content scripts into the tab if it was opened before extension reload
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: [
+          "dist/utils/dom-extractor.js",
+          "dist/privacy/sanitizer/structural-redact.js",
+          "dist/content/capture-content.js",
+        ],
+      });
+      // Retry message delivery
+      return (await chrome.tabs.sendMessage(tabId, message)) as T;
+    }
+    throw err;
+  }
 }
 
 /**

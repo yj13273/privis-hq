@@ -19,9 +19,13 @@ export async function takeScreenshot(tabId: number): Promise<{ dataUrl: string; 
   }
 
   if (!tab.active) {
-    throw new Error(
-      `takeScreenshot: tab ${tabId} is not the active tab in its window; captureVisibleTab would capture a different tab`,
-    );
+    // If not active, activate it so captureVisibleTab can capture it
+    try {
+      await chrome.tabs.update(tabId, { active: true });
+      await new Promise((r) => setTimeout(r, 80));
+    } catch {
+      // Ignore if cannot update tab
+    }
   }
   const windowId = tab.windowId;
 

@@ -1,0 +1,164 @@
+/* PRIVIS demo HUD — extension popup. */
+:root {
+  --bg: #0e1116;
+  --panel: #171c24;
+  --panel-2: #1f2630;
+  --ink: #e7edf3;
+  --ink-dim: #8b98a9;
+  --line: #2a3340;
+  --accent: #4cc38a;
+  --warn: #e2b93b;
+  --block: #e05d5d;
+  --chip: #223;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  width: 380px;
+  max-height: 560px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 12px;
+  background: var(--bg);
+  color: var(--ink);
+  font: 13px/1.45 system-ui, sans-serif;
+}
+
+.hud-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.hud-logo { font-weight: 700; letter-spacing: 0.08em; }
+.hud-tagline { display: block; font-size: 10px; color: var(--ink-dim); }
+
+.hud-btn {
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--ink);
+  cursor: pointer;
+  font-weight: 600;
+}
+.hud-btn:hover { border-color: var(--accent); }
+.hud-btn:disabled { opacity: 0.5; cursor: default; }
+
+.hud-idle { color: var(--ink-dim); padding: 8px; }
+.hud-idle code { color: var(--ink); }
+
+.hud-pipeline { display: flex; flex-direction: column; gap: 8px; }
+
+.hud-step {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 8px 10px;
+  animation: hud-in 0.25s ease-out;
+}
+
+@keyframes hud-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+.hud-step-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.hud-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #0b120e;
+  font-size: 11px;
+  flex: none;
+}
+
+.hud-step-body { margin-top: 6px; color: var(--ink-dim); }
+.hud-step-body strong { color: var(--ink); }
+
+.hud-thumbs { display: flex; gap: 8px; }
+.hud-thumb { flex: 1; text-align: center; }
+.hud-thumb canvas,
+.hud-thumb img {
+  width: 100%;
+  max-height: 130px;
+  object-fit: contain;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #111;
+  display: block;
+}
+.hud-thumb figcaption { font-size: 10px; margin-top: 3px; }
+
+.hud-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.hud-chip {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--chip);
+  border: 1px solid var(--line);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.hud-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 12px;
+}
+.hud-badge.allow { background: #12331f; color: var(--accent); }
+.hud-badge.human { background: #38300f; color: var(--warn); }
+.hud-badge.block { background: #3a1518; color: var(--block); }
+
+.hud-mono {
+  font-family: ui-monospace, monospace;
+  background: var(--panel-2);
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--ink);
+}
+
+.hud-map {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 6px 0;
+  font-size: 11px;
+}
+.hud-map th,
+.hud-map td {
+  text-align: left;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  word-break: break-all;
+}
+.hud-map th {
+  background: var(--panel-2);
+  color: var(--ink);
+  font-weight: 600;
+}
+.hud-map td.hud-mono {
+  color: var(--accent);
+  font-weight: 600;
+  background: transparent;
+}
+
+.hud-footer {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: 10px;
+  color: var(--ink-dim);
+}
