@@ -18,7 +18,7 @@ Overlapping boxes from both sources are merged (union), keeping the highest conf
 
 ## DOM path (now)
 
-Implemented in `privacy/sanitizer/structural-redact.js` (`detectSensitive`): regex matchers for PAN / Aadhaar / email / phone / amount patterns, `input[type=password]` fields, and name-labelled fields to assign categories. This folder stays code-free until the vision path lands.
+The deterministic engine is implemented in `privacy/sanitizer/structural-redact.ts` (`detectSensitive` and `detectVisibleTextPii`). It handles PAN / Aadhaar / email / phone / amount patterns, Luhn-validated card-like values, sensitive autocomplete/input fields, and visible text nodes with viewport-relative `Range` boxes. The vision adapter contract lives in `vision-detector.ts`; real model adapters can be added without changing the capture or privacy contracts.
 
 ## Vision path (later)
 

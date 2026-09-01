@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>PRIVIS Real QR and Face Test</title>
+  <style>body { font: 16px system-ui, sans-serif; margin: 24px; } img, canvas { display: block; margin: 12px 0; max-width: 320px; } pre { background: #f4f4f4; padding: 16px; }</style>
+</head>
+<body>
+  <h1>REAL LOCAL QR AND FACE TEST</h1>
+  <p>The QR canvas is generated as a real QR image. The face fixture is a locally served public photograph processed for local inference.</p>
+  <canvas id="qr" width="320" height="320"></canvas>
+  <img id="face" width="320" alt="Real face fixture photograph" src="fixtures/face.jpg">
+  <pre id="output">Running QR and BlazeFace...</pre>
+  <script src="../dist/test/vision.test.js"></script>
+</body>
+</html>

@@ -1,69 +1,35 @@
-// remote/client.ts
-// Network gateway to remote agent model (only outbound network pathway).
-//
-// Responsibilities:
-// - Sends ONLY sanitized screenshot and tokenized DOM context to remote server.
-// - Returns planned actions array from remote agent.
-
 import type { Action, SanitizedPackage } from "../types/index.js";
+import { assertSanitizedPackage } from "../privacy/policy-gate/privacy-gate.js";
+import { validateAction } from "../executor/action-validation.js";
 
-// Last-line defense: the Sanitizer should have replaced these before anything
-// reaches this file. If they appear, something upstream broke — refuse to send.
-const PII_PATTERNS: { name: string; re: RegExp }[] = [
-  { name: "PAN", re: /[a-z]{5}[0-9]{4}[a-z]/i },
-  { name: "AADHAAR", re: /\b\d{4}[\s-]?\d{4}[\s-]?\d{4}\b/ },
-  { name: "EMAIL", re: /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/ },
-];
+export interface RemoteClientOptions { endpoint?: string; fetchImpl?: typeof fetch; }
 
-/**
- * Throws unless pkg looks like a SanitizedPackage (not a raw CapturePackage)
- * and contains no PII patterns in any text field that would cross the wire.
- * @param pkg Candidate sanitized package
- */
-function assertSanitized(pkg: SanitizedPackage): void {
-  const raw = pkg as unknown as Record<string, unknown>;
-  for (const key of ["tabId", "dataUrl", "elements", "detections"]) {
-    if (key in raw) {
-      throw new Error(
-        `Refusing to send: package has raw field "${key}" — run the Sanitizer first`
-      );
-    }
-  }
-  if (typeof pkg.goal !== "string" || pkg.goal.length === 0) {
-    throw new Error("Refusing to send: missing goal");
-  }
-  if (typeof pkg.sanitizedScreenshot !== "string" || pkg.sanitizedScreenshot === "") {
-    throw new Error("Refusing to send: missing sanitizedScreenshot");
-  }
-  if (!pkg.sanitizedContext || !Array.isArray(pkg.sanitizedContext.elements)) {
-    throw new Error("Refusing to send: missing sanitizedContext");
+export class RemoteClient {
+  private readonly endpoint: string;
+  private readonly fetchImpl: typeof fetch;
+
+  constructor(options: RemoteClientOptions = {}) {
+    this.endpoint = options.endpoint ?? "http://127.0.0.1:8787/agent/analyze";
+    // WorkerGlobalScope.fetch requires its receiver; storing the bare method
+    // and invoking it later causes an Illegal invocation error in MV3 workers.
+    this.fetchImpl = (options.fetchImpl ?? fetch).bind(globalThis);
   }
 
-  // Scan the full serialized context (every element field, browser state, goal)
-  // so no unscanned metadata field can carry PII across the wire.
-  const serialized = JSON.stringify({
-    goal: pkg.goal,
-    ...pkg.sanitizedContext,
-  });
-  for (const { name, re } of PII_PATTERNS) {
-    if (re.test(serialized)) {
-      throw new Error(
-        `Refusing to send: ${name} pattern found in sanitized package — Sanitizer leaked`
-      );
-    }
+  async analyze(pkg: SanitizedPackage): Promise<Action[]> {
+    assertSanitizedPackage(pkg);
+    const response = await this.fetchImpl(this.endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ goal: pkg.goal, sanitizedScreenshot: pkg.sanitizedScreenshot, sanitizedContext: pkg.sanitizedContext, redactions: pkg.redactions ?? [], schemaVersion: pkg.schemaVersion ?? "1.0" }),
+    });
+    if (!response.ok) throw new Error(`Remote agent request failed (${response.status})`);
+    const body = await response.json() as { actions?: Action[]; action?: Action };
+    const actions = Array.isArray(body.actions) ? body.actions : body.action ? [body.action] : [];
+    if (!actions.every((action) => validateAction(action).ok)) throw new Error("Remote agent returned an invalid action");
+    return actions;
   }
 }
 
-/**
- * Sends sanitized package to the remote planner endpoint.
- * Called strictly after Policy Gate grants "allow".
- * @param pkg Sanitized package containing tokens and redacted image
- */
 export async function sendSanitized(pkg: SanitizedPackage): Promise<Action[]> {
-  assertSanitized(pkg);
-
-  // v0 stub: no network call yet. A real VLM agent plugs in here — it would
-  // POST { goal, sanitizedScreenshot, sanitizedContext } and parse Action[]
-  // from the response. Until then, return the fixture action.
-  return [{ type: "click", target: "#submit" }];
+  return new RemoteClient().analyze(pkg);
 }

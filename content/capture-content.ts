@@ -14,16 +14,23 @@ import type {
   ElementMeta,
   ExecuteRequestMessage,
   ExecuteResponseMessage,
+  CaptureResponseMessage,
 } from "../types/index.js";
 import { collectBrowserState, extractElements } from "../utils/dom-extractor.js";
 import { isPrivisMessage } from "../utils/messaging.js";
+import { detectSensitive, detectVisibleTextPii } from "../privacy/sanitizer/structural-redact.js";
 
 /**
  * Capture Layer content-script half: visible elements + browser state.
  * No placeholders, no clicks — those live elsewhere (Sanitizer / Local Executor).
  */
-export function captureDom(): { elements: ElementMeta[]; browserState: BrowserState } {
-  return { elements: extractElements(), browserState: collectBrowserState() };
+export function captureDom(): CaptureResponseMessage["payload"] {
+  const elements = extractElements();
+  return {
+    elements,
+    browserState: collectBrowserState(),
+    detections: [...detectSensitive(elements), ...detectVisibleTextPii(document)],
+  };
 }
 
 // In-memory real value store for placeholder resolution (never sent upstream).
@@ -115,7 +122,29 @@ async function executeActions(actions: Action[]): Promise<ExecuteResponseMessage
 // Execute channel for the Local Executor. The capture.request channel lands with
 // the orchestrator issue (#15) — capture is out of scope here.
 chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
+  if (isPrivisMessage(message) && message.type === "capture.request") {
+    try {
+      sendResponse({ type: "capture.response", payload: captureDom() } satisfies CaptureResponseMessage);
+    } catch (error) {
+      sendResponse({ error: error instanceof Error ? error.message : String(error) });
+    }
+    return false;
+  }
   if (!isExecuteRequest(message)) return false;
   void executeActions(message.payload.actions).then(sendResponse);
   return true; // keep the channel open for the async response
+});
+
+// The demo page cannot access chrome.runtime. Keep this bridge local-demo-only
+// and fixed-goal so arbitrary pages cannot trigger capture or actions.
+window.addEventListener("message", (event: MessageEvent<unknown>) => {
+  const localDemo = (location.hostname === "127.0.0.1" || location.hostname === "localhost") && event.origin === location.origin;
+  if (!localDemo || event.source !== window || !event.data || typeof event.data !== "object") return;
+  const message = event.data as { type?: unknown; goal?: unknown; requestId?: unknown };
+  if (message.type !== "PRIVIS_RUN_STEP" || message.goal !== "Find the submit button and click it" || typeof message.requestId !== "string") return;
+  chrome.runtime.sendMessage({ type: "PRIVIS_RUN_STEP", goal: message.goal }).then((result: unknown) => {
+    window.postMessage({ type: "PRIVIS_RUN_STEP_RESULT", requestId: message.requestId, result }, location.origin);
+  }).catch((error: unknown) => {
+    window.postMessage({ type: "PRIVIS_RUN_STEP_RESULT", requestId: message.requestId, result: { decision: "block", reason: error instanceof Error ? error.message : "Pipeline failed closed" } }, location.origin);
+  });
 });

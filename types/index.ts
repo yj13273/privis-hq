@@ -9,9 +9,13 @@ export type SensitiveCategory =
   | "PHONE"
   | "NAME"
   | "FACE"
-  | "PASSWORD";
+  | "PASSWORD"
+  | "QR"
+  | "OCR_TEXT"
+  | "SIGNATURE"
+  | "ORG";
 
-export type DetectionSource = "dom" | "vision";
+export type DetectionSource = "dom" | "vision" | "rule";
 
 export type BoundingBox = [x: number, y: number, width: number, height: number];
 
@@ -21,12 +25,14 @@ export interface Detection {
   bbox: BoundingBox;
   confidence: number;
   source: DetectionSource;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ElementMeta {
   element_id: string;
   tag: string;
   type: string | null;
+  autocomplete?: string | null;
   role: string | null;
   label: string | null;
   text: string;
@@ -68,6 +74,7 @@ export interface CapturePackage {
   elements: ElementMeta[];
   detections: Detection[];
   browserState: BrowserState;
+  diagnostics?: Record<string, unknown>;
 }
 
 export interface SanitizedContext {
@@ -76,9 +83,12 @@ export interface SanitizedContext {
 }
 
 export interface SanitizedPackage {
+  schemaVersion?: "1.0";
   goal: string;
   sanitizedScreenshot: string;
   sanitizedContext: SanitizedContext;
+  redactions?: Array<Pick<Detection, "category" | "bbox" | "confidence" | "source">>;
+  sanitized: true;
 }
 
 export interface StepResult {
@@ -96,6 +106,7 @@ export interface CaptureResponseMessage {
   payload: {
     elements: ElementMeta[];
     browserState: BrowserState;
+    detections: Detection[];
   };
 }
 

@@ -8,15 +8,14 @@
 
 import type { Detection, Viewport } from "../../types/index.js";
 
-// Every category except FACE is blacked out; FACE is pixelated.
+// Policy is explicit: credentials/cards/signatures/QR are blacked out, while
+// faces/contact data use blur or pixelation to retain scene structure.
 const BLACKOUT_CATEGORIES: ReadonlySet<Detection["category"]> = new Set([
   "PASSWORD",
   "PAN",
   "AADHAAR",
-  "EMAIL",
-  "PHONE",
-  "AMOUNT",
-  "NAME",
+  "SIGNATURE",
+  "QR",
 ]);
 
 type AnyCanvas = HTMLCanvasElement | OffscreenCanvas;
@@ -88,6 +87,13 @@ function pixelate(
   ctx.drawImage(tiny, 0, 0, tilesX, tilesY, x, y, w, h);
 }
 
+function blur(ctx: AnyContext, src: CanvasImageSource, x: number, y: number, w: number, h: number): void {
+  ctx.save();
+  ctx.filter = "blur(12px)";
+  ctx.drawImage(src, x, y, w, h, x, y, w, h);
+  ctx.restore();
+}
+
 /**
  * Redacts sensitive bounding box regions on an in-memory image copy.
  * Returns a new PNG data URL; the input string is never mutated.
@@ -122,9 +128,9 @@ export async function redactVisual(
     const h = bottom - y;
     if (w <= 0 || h <= 0) continue;
 
-    if (detection.category === "FACE") {
-      // Pixelate from the already-redacted canvas, not the raw image, so any
-      // blackout drawn underneath (overlapping PII) isn't repainted raw.
+    if (detection.category === "FACE" || detection.category === "EMAIL" || detection.category === "PHONE" || detection.category === "NAME" || detection.category === "ORG") {
+      blur(ctx, canvas, x, y, w, h);
+    } else if (detection.category === "OCR_TEXT") {
       pixelate(ctx, canvas, x, y, w, h);
     } else if (BLACKOUT_CATEGORIES.has(detection.category)) {
       ctx.fillStyle = "#000";

@@ -93,6 +93,7 @@ export function extractElements(): ElementMeta[] {
       element_id: elementId(el),
       tag: el.tagName.toLowerCase(),
       type: el.tagName === "INPUT" ? (input.type || null) : null,
+      autocomplete: el.getAttribute("autocomplete"),
       role: el.getAttribute("role"),
       label: labelFor(el),
       text,

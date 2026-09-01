@@ -3,6 +3,7 @@
 
 import type { Action, ActionResult, ExecuteResponseMessage } from "../types/index.js";
 import { sendToContent } from "../utils/messaging.js";
+import { validateAction } from "./action-validation.js";
 
 /**
  * Executes a sequence of actions in order on the target tab.
@@ -12,6 +13,8 @@ import { sendToContent } from "../utils/messaging.js";
  */
 export async function applyActions(tabId: number, actions: Action[]): Promise<ActionResult[]> {
   if (actions.length === 0) return [];
+  const invalid = actions.map(validateAction).find((result) => !result.ok);
+  if (invalid && !invalid.ok) return [{ ok: false, error: invalid.error }];
   try {
     const response = await sendToContent<ExecuteResponseMessage>(tabId, {
       type: "execute.request",

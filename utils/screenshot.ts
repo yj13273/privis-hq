@@ -9,7 +9,7 @@
  * Captures the visible tab into an in-memory PNG data URL.
  * @param tabId Target tab ID
  */
-export async function takeScreenshot(tabId: number): Promise<{ dataUrl: string }> {
+export async function takeScreenshot(tabId: number): Promise<{ dataUrl: string; width: number; height: number }> {
   // captureVisibleTab works on the active tab of a window; resolve the tab's window.
   let tab: chrome.tabs.Tab;
   try {
@@ -30,9 +30,21 @@ export async function takeScreenshot(tabId: number): Promise<{ dataUrl: string }
     if (!dataUrl) {
       throw new Error("takeScreenshot: captureVisibleTab returned empty data");
     }
-    return { dataUrl };
+    const dimensions = pngDimensions(dataUrl);
+    return { dataUrl, ...dimensions };
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     throw new Error(`takeScreenshot: capture failed: ${detail}`);
   }
+}
+
+function pngDimensions(dataUrl: string): { width: number; height: number } {
+  const encoded = dataUrl.split(",", 2)[1];
+  if (!encoded) throw new Error("takeScreenshot: invalid PNG data URL");
+  const bytes = Uint8Array.from(atob(encoded), (char) => char.charCodeAt(0));
+  if (bytes.length < 24 || bytes[0] !== 0x89 || bytes[1] !== 0x50 || bytes[2] !== 0x4e || bytes[3] !== 0x47) {
+    throw new Error("takeScreenshot: captured data is not a PNG");
+  }
+  const view = new DataView(bytes.buffer);
+  return { width: view.getUint32(16), height: view.getUint32(20) };
 }

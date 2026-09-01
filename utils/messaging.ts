@@ -21,6 +21,7 @@ function isElementMeta(val: unknown): boolean {
     typeof val.element_id === "string" &&
     typeof val.tag === "string" &&
     (val.type === null || typeof val.type === "string") &&
+    (val.autocomplete === undefined || val.autocomplete === null || typeof val.autocomplete === "string") &&
     (val.role === null || typeof val.role === "string") &&
     (val.label === null || typeof val.label === "string") &&
     typeof val.text === "string" &&
@@ -38,6 +39,18 @@ function isBrowserState(val: unknown): boolean {
     !Number.isNaN(val.viewport.w) &&
     typeof val.viewport.h === "number" &&
     !Number.isNaN(val.viewport.h)
+  );
+}
+
+function isDetection(val: unknown): boolean {
+  if (!isObject(val)) return false;
+  return (
+    typeof val.element_id === "string" &&
+    typeof val.category === "string" &&
+    isBoundingBox(val.bbox) &&
+    typeof val.confidence === "number" &&
+    val.confidence >= 0 && val.confidence <= 1 &&
+    (val.source === "dom" || val.source === "vision")
   );
 }
 
@@ -82,7 +95,9 @@ export function isPrivisMessage(message: unknown): message is PrivisMessage {
       return (
         Array.isArray(payload.elements) &&
         payload.elements.every(isElementMeta) &&
-        isBrowserState(payload.browserState)
+        isBrowserState(payload.browserState) &&
+        Array.isArray(payload.detections) &&
+        payload.detections.every(isDetection)
       );
     }
 

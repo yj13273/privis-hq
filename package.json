@@ -4,13 +4,23 @@
   "description": "PRIVIS: On-device Visual Perception for Light-weight Browser Agents",
   "type": "module",
   "scripts": {
-    "build": "esbuild background/service-worker.ts utils/dom-extractor.ts privacy/sanitizer/structural-redact.ts content/capture-content.ts --bundle --format=iife --outdir=dist",
+    "build": "esbuild background/service-worker.ts utils/dom-extractor.ts privacy/sanitizer/structural-redact.ts content/capture-content.ts privacy/engine/ocr-detector.ts privacy/engine/qr-detector.ts privacy/engine/face-detector.ts privacy/merge/merge-engine.ts privacy/sanitizer/package-sanitizer.ts privacy/policy-gate/privacy-gate.ts remote/client.ts executor/local-executor.ts test/ocr.test.ts test/vision.test.ts --bundle --format=iife --outdir=dist",
+    "server": "node server/server.mjs",
     "typecheck": "tsc --noEmit",
     "watch": "npm run build -- --watch"
   },
   "devDependencies": {
     "@types/chrome": "^0.2.7",
+    "@types/qrcode": "^1.5.6",
     "esbuild": "^0.28.2",
+    "qrcode": "^1.5.4",
     "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@tensorflow-models/blazeface": "^0.0.7",
+    "@tensorflow/tfjs": "^3.21.0",
+    "@tesseract.js-data/eng": "^1.0.0",
+    "jsqr": "^1.4.0",
+    "tesseract.js": "^5.1.1"
   }
 }
