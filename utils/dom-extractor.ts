@@ -134,8 +134,14 @@ export function extractElements(snapshotVersion?: number): ElementMeta[] {
       ...(ariaChecked !== null || ["checkbox", "radio"].includes(input.type)
         ? { checked: ariaChecked !== null ? ariaChecked === "true" : input.checked }
         : {}),
-      ...(ariaSelected !== null || el.tagName === "OPTION"
-        ? { selected: ariaSelected !== null ? ariaSelected === "true" : (el as HTMLOptionElement).selected }
+      ...(ariaSelected !== null || el.tagName === "OPTION" || el.tagName === "SELECT"
+        ? {
+            selected: ariaSelected !== null
+              ? ariaSelected === "true"
+              : el.tagName === "SELECT"
+                ? (el as HTMLSelectElement).selectedIndex >= 0
+                : (el as HTMLOptionElement).selected,
+          }
         : {}),
       ...(ariaExpanded !== null ? { expanded: ariaExpanded === "true" } : {}),
       focused: document.activeElement === el,

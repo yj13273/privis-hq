@@ -70,7 +70,11 @@ function domPackage(tabId: number): Promise<CaptureResponseMessage> {
 // across extractions (the content script keys them by DOM node), so equality
 // here means the page did not change between snapshots.
 function packageFingerprint(dom: CaptureResponseMessage): string {
-  return JSON.stringify(dom.payload);
+  const { elements, browserState } = dom.payload;
+  return JSON.stringify({
+    browserState,
+    elements: elements.map(({ snapshotVersion: _snapshotVersion, ...element }) => element),
+  });
 }
 
 export async function capturePackage(tabId: number): Promise<CapturePackage> {
