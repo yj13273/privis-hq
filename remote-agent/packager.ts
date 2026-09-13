@@ -10,7 +10,7 @@ import systemPromptText from "./prompt.md";
 
 export interface LastStepResult {
   action?: AgentAction;
-  result?: { ok: boolean; error?: string };
+  result?: { ok: boolean; error?: string; detail?: string };
 }
 
 export interface PackagedPrompt {
@@ -60,6 +60,7 @@ function formatLastStepResult(lastStep?: LastStepResult): string | null {
     } else {
       parts.push(`Result: FAILED (${redactPii(lastStep.result.error || "unknown error")})`);
     }
+    if (lastStep.result.detail) parts.push(`Detail: ${redactPii(lastStep.result.detail)}`);
   }
 
   return parts.length > 0 ? parts.join(" -> ") : null;
@@ -105,7 +106,7 @@ export function buildUserPrompt(
       if (el.type) parts.push(`type="${el.type}"`);
       if (el.role) parts.push(`role="${el.role}"`);
       if (el.snapshotVersion !== undefined) {
-        parts.push(`ref={snapshotVersion:${el.snapshotVersion},documentId:"${el.documentId ?? ""}",elementId:"${el.element_id}"}`);
+        parts.push(`ref={snapshotVersion:${el.snapshotVersion},documentId:"${el.documentId ?? ""}",frameId:${el.frameId ?? 0},elementId:"${el.element_id}"}`);
       }
       if (el.parentElementId) parts.push(`parentElementId="${el.parentElementId}"`);
       for (const [key, value] of [

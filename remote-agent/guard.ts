@@ -221,6 +221,40 @@ function validateActionWithGuard(
       return { ok: true, action: { type: "navigate", url: rawUrl } };
     }
 
+    case "open_tab": {
+      if (obj.url !== undefined && (typeof obj.url !== "string" || !obj.url.trim())) {
+        return { ok: false, error: "'open_tab' url must be a non-empty string when provided" };
+      }
+      if (typeof obj.url === "string") {
+        let parsed: URL;
+        try { parsed = new URL(obj.url.trim()); } catch { return { ok: false, error: "Invalid URL in open_tab action" }; }
+        if (!ALLOWED_NAVIGATE_PROTOCOLS.includes(parsed.protocol)) {
+          return { ok: false, error: "'open_tab' only supports http: and https: URLs" };
+        }
+        const pii = findPiiInValue(obj.url);
+        if (pii) return { ok: false, error: `Raw ${pii} detected in open_tab URL` };
+        return { ok: true, action: { type: "open_tab", url: parsed.toString() } };
+      }
+      return { ok: true, action: { type: "open_tab" } };
+    }
+
+    case "switch_tab": {
+      if (typeof obj.tabRef !== "string" || !obj.tabRef.trim()) {
+        return { ok: false, error: "'switch_tab' requires an opaque tabRef" };
+      }
+      return { ok: true, action: { type: "switch_tab", tabRef: obj.tabRef.trim() } };
+    }
+
+    case "close_tab": {
+      if (obj.tabRef !== undefined && (typeof obj.tabRef !== "string" || !obj.tabRef.trim())) {
+        return { ok: false, error: "'close_tab' tabRef must be non-empty when provided" };
+      }
+      return { ok: true, action: { type: "close_tab", ...(obj.tabRef !== undefined ? { tabRef: obj.tabRef.trim() } : {}) } };
+    }
+
+    case "list_tabs":
+      return { ok: true, action: { type: "list_tabs" } };
+
     case "click": {
       if (!isTarget(obj.target)) {
         return {

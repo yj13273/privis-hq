@@ -61,6 +61,7 @@ function resolveTarget(
     return sanitized.find((el) =>
       el.snapshotVersion === ref.snapshotVersion &&
       el.documentId === ref.documentId &&
+      (ref.frameId === undefined || el.frameId === ref.frameId) &&
       el.element_id === ref.elementId
     );
   }

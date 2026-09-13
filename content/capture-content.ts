@@ -35,13 +35,21 @@ const documentId = typeof crypto !== "undefined" && typeof crypto.randomUUID ===
  * Capture Layer content-script half: visible elements + browser state.
  * No placeholders, no clicks — those live elsewhere (Sanitizer / Local Executor).
  */
-export function captureDom(): { elements: ElementMeta[]; browserState: BrowserState; snapshotVersion: number; documentId: string } {
+export function captureDom(frameId = 0): { elements: ElementMeta[]; browserState: BrowserState; snapshotVersion: number; documentId: string; frameId: number } {
   snapshotVersion += 1;
+  const frameRect = window.frameElement?.getBoundingClientRect();
+  const offsetX = frameRect?.x ?? 0;
+  const offsetY = frameRect?.y ?? 0;
   return {
-    elements: extractElements(snapshotVersion, documentId),
+    elements: extractElements(snapshotVersion, documentId).map((element) => ({
+      ...element,
+      frameId,
+      bbox: [element.bbox[0] + offsetX, element.bbox[1] + offsetY, element.bbox[2], element.bbox[3]] as ElementMeta["bbox"],
+    })),
     browserState: collectBrowserState(),
     snapshotVersion,
     documentId,
+    frameId,
   };
 }
 
@@ -107,6 +115,20 @@ function liveTarget(locator: LiveTarget): HTMLElement | null {
   }) ?? null;
 }
 
+function queryOpenShadow<T extends Element>(selector: string, root: ParentNode = document): T | null {
+  try {
+    const direct = root.querySelector<T>(selector);
+    if (direct) return direct;
+  } catch { /* invalid selector is handled by the caller */ }
+  for (const host of root.querySelectorAll<HTMLElement>("*")) {
+    if (host.shadowRoot) {
+      const found = queryOpenShadow<T>(selector, host.shadowRoot);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
 export function resolveTarget(target: string, locator?: LiveTarget): HTMLElement | null {
   if (locator) return liveTarget(locator);
   const generatedPrefix = "__privis_generated:";
@@ -114,12 +136,12 @@ export function resolveTarget(target: string, locator?: LiveTarget): HTMLElement
     return resolveGeneratedElement(target.slice(generatedPrefix.length));
   }
 
-  const byId = document.getElementById(target);
+  const byId = document.getElementById(target) ?? queryOpenShadow<HTMLElement>(`#${CSS.escape(target)}`);
   if (byId) return byId;
 
   let bySelector: HTMLElement | null = null;
   try {
-    bySelector = document.querySelector<HTMLElement>(target);
+    bySelector = queryOpenShadow<HTMLElement>(target);
   } catch {
     // Invalid CSS selector: fall through to the attribute lookup instead of throwing.
   }
@@ -388,7 +410,7 @@ function isCaptureRequest(message: unknown): message is CaptureRequestMessage {
 // the background half lives in background/service-worker.ts.
 chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
   if (!isCaptureRequest(message)) return false;
-  sendResponse({ type: "capture.response", payload: captureDom() });
+  sendResponse({ type: "capture.response", payload: captureDom(message.frameId ?? 0) });
   return false;
 });
 

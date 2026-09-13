@@ -10,13 +10,13 @@ import { sendToContent } from "../utils/messaging.js";
  * @param tabId Target tab ID
  * @param actions Array of actions to apply
  */
-export async function applyActions(tabId: number, actions: Action[]): Promise<ActionResult[]> {
+export async function applyActions(tabId: number, actions: Action[], frameId = 0): Promise<ActionResult[]> {
   if (actions.length === 0) return [];
   try {
     const response = await sendToContent<ExecuteResponseMessage>(tabId, {
       type: "execute.request",
       payload: { actions },
-    });
+    }, frameId);
     return response.payload.results;
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);

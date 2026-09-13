@@ -107,7 +107,7 @@ export function isPrivisMessage(message: unknown): message is PrivisMessage {
  * @param tabId Target tab ID
  * @param message Message payload
  */
-export async function sendToContent<T = unknown>(tabId: number, message: PrivisMessage): Promise<T> {
+export async function sendToContent<T = unknown>(tabId: number, message: PrivisMessage, frameId = 0): Promise<T> {
   if (!isPrivisMessage(message)) {
     throw new Error(`Invalid PrivisMessage: ${String((message as { type?: unknown })?.type ?? message)}`);
   }
@@ -115,7 +115,7 @@ export async function sendToContent<T = unknown>(tabId: number, message: PrivisM
     throw new Error("chrome.tabs.sendMessage is not available");
   }
   try {
-    return (await chrome.tabs.sendMessage(tabId, message)) as T;
+    return (await chrome.tabs.sendMessage(tabId, message, { frameId })) as T;
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     if (
@@ -124,7 +124,7 @@ export async function sendToContent<T = unknown>(tabId: number, message: PrivisM
     ) {
       // Auto-inject content scripts into the tab if it was opened before extension reload
       await chrome.scripting.executeScript({
-        target: { tabId },
+        target: { tabId, frameIds: [frameId] },
         files: [
           "dist/utils/dom-extractor.js",
           "dist/privacy/sanitizer/structural-redact.js",
@@ -132,7 +132,7 @@ export async function sendToContent<T = unknown>(tabId: number, message: PrivisM
         ],
       });
       // Retry message delivery
-      return (await chrome.tabs.sendMessage(tabId, message)) as T;
+      return (await chrome.tabs.sendMessage(tabId, message, { frameId })) as T;
     }
     throw err;
   }

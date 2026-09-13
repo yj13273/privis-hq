@@ -5,6 +5,7 @@ import type { ActionErrorCode } from "../types/index.js";
 export interface ElementReference {
   snapshotVersion: number;
   documentId: string;
+  frameId?: number;
   elementId: string;
 }
 
@@ -19,6 +20,25 @@ export interface Target {
 export interface NavigateAction {
   type: "navigate";
   url: string;
+}
+
+export interface OpenTabAction {
+  type: "open_tab";
+  url?: string;
+}
+
+export interface SwitchTabAction {
+  type: "switch_tab";
+  tabRef: string;
+}
+
+export interface CloseTabAction {
+  type: "close_tab";
+  tabRef?: string;
+}
+
+export interface ListTabsAction {
+  type: "list_tabs";
 }
 
 export interface ClickAction {
@@ -113,6 +133,10 @@ export interface AskHumanAction {
 
 export type AgentAction =
   | NavigateAction
+  | OpenTabAction
+  | SwitchTabAction
+  | CloseTabAction
+  | ListTabsAction
   | ClickAction
   | TypeAction
   | ScrollAction
@@ -133,7 +157,7 @@ export interface SessionStep {
   step: number;
   url: string;
   action: AgentAction;
-  result?: { ok: boolean; error?: string; code?: ActionErrorCode };
+  result?: { ok: boolean; error?: string; code?: ActionErrorCode; detail?: string };
   timestamp: number;
 }
 
@@ -259,6 +283,7 @@ export function isTarget(target: unknown): target is Target {
     (ref.snapshotVersion as number) > 0 &&
     typeof ref.documentId === "string" &&
     ref.documentId.trim().length > 0 &&
+    (ref.frameId === undefined || (Number.isInteger(ref.frameId) && (ref.frameId as number) >= 0)) &&
     typeof ref.elementId === "string" &&
     ref.elementId.trim().length > 0;
 
