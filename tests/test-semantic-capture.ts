@@ -11,6 +11,7 @@ class FakeElement {
   attrs: Record<string, string> = {};
   constructor(public tagName: string, text = "") { this.textContent = text; }
   getAttribute(name: string) { return this.attrs[name] ?? null; }
+  hasAttribute(name: string) { return name in this.attrs; }
   getBoundingClientRect() { return { x: 10, y: 20, width: 100, height: 30 }; }
   matches() { return false; }
   closest() { return null; }
