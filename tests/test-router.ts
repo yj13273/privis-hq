@@ -502,6 +502,20 @@ assert.doesNotThrow(() =>
   )
 );
 
+// Gmail exposes recipient chips as display name plus a hidden/raw address.
+// Keep the name useful to the planner while the address becomes a placeholder.
+const recipientChip: ElementMeta[] = [{
+  element_id: "recipient", tag: "div", type: null, role: "option", label: null,
+  text: "Vansh Khurana <vansh125khurana@gmail.com>", bbox: [0, 0, 100, 20],
+}];
+const recipientRedaction = applyPlaceholders(recipientChip, detectSensitive(recipientChip));
+assert.match(recipientRedaction.sanitized[0].text, /^Vansh Khurana <EMAIL_\d+>$/);
+assert.strictEqual(recipientRedaction.map.recipient, "vansh125khurana@gmail.com");
+assert.doesNotThrow(() => assertSanitizedPackage(createValidSanitizedPackage({
+  sanitizedContext: { ...pkg.sanitizedContext, elements: recipientRedaction.sanitized },
+})));
+console.log("  ✔ Sanitizer redacts embedded Gmail recipient addresses");
+
 // Reject raw PII leaked inside sanitizedContext
 const leakedPkg = createValidSanitizedPackage({
   sanitizedContext: {

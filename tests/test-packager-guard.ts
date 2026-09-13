@@ -285,6 +285,39 @@ if (validType.ok) {
 
 const validScroll = guardModelOutput('{"type": "scroll", "dy": 300}', { sanitizedPackage: pkg });
 assert.strictEqual(validScroll.ok, true);
+
+const batchContext = {
+  ...pkg,
+  sanitizedContext: {
+    ...pkg.sanitizedContext,
+    elements: pkg.sanitizedContext.elements.slice(0, 2).map((element, index) => ({
+      ...element,
+      snapshotVersion: 7,
+      documentId: "doc-test",
+      element_id: `field-${index}`,
+    })),
+  },
+};
+const batch = guardModelOutput(JSON.stringify({
+  type: "batch",
+  actions: [
+    { type: "type", target: { ref: { snapshotVersion: 7, documentId: "doc-test", elementId: "field-0" } }, placeholder: "EMAIL_1" },
+    { type: "type", target: { ref: { snapshotVersion: 7, documentId: "doc-test", elementId: "field-1" } }, placeholder: "PAN_1" },
+  ],
+}), { sanitizedPackage: batchContext });
+assert.strictEqual(batch.ok, true, "valid same-snapshot batch passes");
+assert.strictEqual((batch.ok && batch.action.type), "batch");
+const unsafeBatch = guardModelOutput(JSON.stringify({
+  type: "batch",
+  actions: [{ type: "navigate", url: "https://example.com" }],
+}), { sanitizedPackage: batchContext });
+assert.strictEqual(unsafeBatch.ok, false, "navigation is rejected inside a batch");
+const cssBatch = guardModelOutput(JSON.stringify({
+  type: "batch",
+  actions: [{ type: "click", target: { css: "#field" } }],
+}), { sanitizedPackage: batchContext });
+assert.strictEqual(cssBatch.ok, false, "non-snapshot batch targets are rejected");
+console.log("  ✔ Batch actions enforce per-action validation and snapshot independence");
 if (validScroll.ok) {
   assert.strictEqual(validScroll.action.type, "scroll");
   assert.strictEqual((validScroll.action as any).dy, 300);

@@ -44,7 +44,8 @@ const FORBIDDEN_RAW_KEYS = ["value", "text", "input", "val", "content", "passwor
 export function redactPii(text: string): string {
   let out = text;
   for (const { name, re } of PII_PATTERNS) {
-    out = out.replace(re, `[REDACTED_${name}]`);
+    const flags = re.flags.includes("g") ? re.flags : `${re.flags}g`;
+    out = out.replace(new RegExp(re.source, flags), `[REDACTED_${name}]`);
   }
   return out;
 }
@@ -97,7 +98,7 @@ function normalizeRawOutput(input: unknown): unknown {
 
   if (typeof val === "object" && val !== null) {
     const record = val as Record<string, unknown>;
-    if (Array.isArray(record.actions)) {
+    if (Array.isArray(record.actions) && record.type !== "batch") {
       throw new Error(
         `Multiple actions detected in 'actions' array (${record.actions.length}) — exactly one action allowed`
       );
@@ -168,7 +169,8 @@ export function findPiiInValue(val: unknown): string | null {
 function validateActionWithGuard(
   candidate: unknown,
   allowlist: Set<string> | null,
-  goalText = ""
+  goalText = "",
+  allowBatch = true
 ): { ok: true; action: AgentAction } | { ok: false; error: string } {
   if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) {
     return { ok: false, error: "Action must be a non-null JSON object" };
@@ -219,6 +221,34 @@ function validateActionWithGuard(
       }
 
       return { ok: true, action: { type: "navigate", url: rawUrl } };
+    }
+
+    case "batch": {
+      if (!allowBatch) return { ok: false, error: "Nested batches are not allowed" };
+      if (!Array.isArray(obj.actions) || obj.actions.length < 1 || obj.actions.length > 8) {
+        return { ok: false, error: "'batch' requires between 1 and 8 sub-actions" };
+      }
+      const actions: AgentAction[] = [];
+      let snapshot: string | undefined;
+      const seen = new Set<string>();
+      for (const subAction of obj.actions) {
+        const checked = validateActionWithGuard(subAction, allowlist, goalText, false);
+        if (!checked.ok) return { ok: false, error: `Invalid batch sub-action: ${checked.error}` };
+        if (checked.action.type === "batch" || ["navigate", "open_tab", "switch_tab", "close_tab", "list_tabs", "scroll", "wait_for", "go_back", "go_forward", "reload", "done", "ask_human", "search"].includes(checked.action.type)) {
+          return { ok: false, error: `Action '${checked.action.type}' is not allowed in a batch` };
+        }
+        const target = "target" in checked.action ? checked.action.target : undefined;
+        const ref = target?.ref;
+        if (!ref) return { ok: false, error: "Every batch sub-action must use a snapshot reference" };
+        const identity = `${ref.documentId}:${ref.snapshotVersion}:${ref.frameId ?? 0}`;
+        if (snapshot && snapshot !== identity) return { ok: false, error: "All batch targets must use the same snapshot" };
+        snapshot = identity;
+        const key = ref.elementId;
+        if (seen.has(key)) return { ok: false, error: "Batch sub-actions must target independent elements" };
+        seen.add(key);
+        actions.push(checked.action);
+      }
+      return { ok: true, action: { type: "batch", actions: actions as any } };
     }
 
     case "open_tab": {

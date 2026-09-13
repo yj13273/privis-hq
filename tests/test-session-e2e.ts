@@ -21,13 +21,41 @@
 
 import assert from "node:assert";
 import { createServer, type Server } from "node:http";
+import type { CaptureResponseMessage } from "../types/index.js";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { installCanvasShims } from "../privacy/engine/vision/test-canvas-shim.js";
-import { runStep } from "../orchestrator/runStep.js";
+import { captureStabilityFingerprint, runStep, successfulActionFingerprint } from "../orchestrator/runStep.js";
 import { MAX_SESSION_STEPS, pendingHumanDecisions, sessionsByTab } from "../orchestrator/session.js";
 import { computeRequestDigest } from "../orchestrator/transparency-log.js";
+
+const stableCompose: CaptureResponseMessage[] = [{
+  type: "capture.response" as const,
+  payload: {
+    frameId: 0,
+    documentId: "doc-compose",
+    snapshotVersion: 1,
+    browserState: { url: "https://mail.example/", title: "Inbox", viewport: { w: 640, h: 480 } },
+    elements: [
+      { element_id: "recipient", tag: "input", type: "email", role: "textbox", label: null, text: "EMAIL_1", bbox: [0, 0, 100, 20], focused: false },
+      { element_id: "inbox-link", tag: "a", type: null, role: "link", label: null, text: "Inbox (1)", bbox: [0, 30, 100, 20], expanded: false },
+    ],
+  },
+}];
+const volatileGmailChrome: CaptureResponseMessage[] = structuredClone(stableCompose);
+volatileGmailChrome[0].payload.elements[1].text = "Inbox (2)";
+volatileGmailChrome[0].payload.elements[1].expanded = true;
+assert.strictEqual(captureStabilityFingerprint(stableCompose), captureStabilityFingerprint(volatileGmailChrome));
+const movedRecipient: CaptureResponseMessage[] = structuredClone(stableCompose);
+movedRecipient[0].payload.elements[0].bbox = [0, 10, 100, 20];
+assert.notStrictEqual(captureStabilityFingerprint(stableCompose), captureStabilityFingerprint(movedRecipient));
+console.log("  ✔ Capture stability ignores Gmail chrome but protects compose controls");
+assert.strictEqual(
+  successfulActionFingerprint({ type: "type", target: { ref: { snapshotVersion: 1, documentId: "doc", elementId: "search" } }, placeholder: "milk" }),
+  successfulActionFingerprint({ type: "type", target: { ref: { snapshotVersion: 2, documentId: "doc", elementId: "search" } }, placeholder: "milk" })
+);
+console.log("  ✔ Successful actions remain deduplicated across fresh snapshots");
 import type { ElementMeta, TransparencyLogStore } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
@@ -444,25 +472,22 @@ async function main() {
     }
     console.log("  PASS CBA-11: Trail 1 wire transparency entries persisted, ordered, and SHA-256 verified");
 
-    // --- Trail 2: never-done brain → cap → ask_human ---------------------
+    // --- Trail 2: repeated successful interaction → ask_human -------------
     formCalls = 0;
     executedActions.length = 0;
     currentPage = LOOP;
     await runStep(LOOP_TAB, "loop forever");
     const loopSession = sessionsByTab.get(LOOP_TAB)!;
-    assert.strictEqual(
-      loopSession.history.filter((h) => h.action.type === "click").length,
-      MAX_SESSION_STEPS,
-      "exactly MAX_SESSION_STEPS executed steps"
-    );
+    const duplicate = loopSession.history.find((h) => h.result?.code === "DUPLICATE_ACTION");
+    assert.ok(duplicate, "repeated successful click is surfaced as duplicate feedback");
     assert.strictEqual(
       loopSession.history[loopSession.history.length - 1].action.type,
       "ask_human",
       "the escalation is recorded so the chat renders it"
     );
-    assert.strictEqual(loopSession.lastAction?.type, "ask_human", "budget exhausted → ask_human");
+    assert.strictEqual(loopSession.lastAction?.type, "ask_human", "duplicate loop → ask_human");
     assert.strictEqual(loopSession.status, "waiting_human");
-    console.log(`  PASS hit step ${MAX_SESSION_STEPS} without done → ask_human, session parks in waiting_human`);
+    console.log("  PASS repeated successful action → duplicate feedback → ask_human");
 
     // --- Trail 3: new goal after an escalation is not deadlocked -----------
     const oldId = loopSession.sessionId;
@@ -474,10 +499,9 @@ async function main() {
       oldId,
       "post-ask_human goal starts a fresh session (no instant re-escalation at step 8)"
     );
-    assert.strictEqual(
-      after.history.filter((h) => h.action.type === "click").length,
-      MAX_SESSION_STEPS,
-      "the new run executes its own step budget"
+    assert.ok(
+      after.history.some((h) => h.result?.code === "DUPLICATE_ACTION"),
+      "the fresh session also stops a repeated action without reusing prior-session state"
     );
     console.log("  PASS post-escalation goal starts a fresh bounded session");
 

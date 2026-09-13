@@ -87,7 +87,9 @@ export function fuseDetections(
   const { w: sw, h: sh } = screenshot;
   const { w: vw, h: vh } = viewport;
   if (sw <= 0 || sh <= 0 || vw <= 0 || vh <= 0) {
-    throw new Error("fuseDetections: screenshot and viewport dimensions must be positive");
+    throw new Error(
+      `fuseDetections: screenshot and viewport dimensions must be positive (screenshot=${sw}x${sh}, viewport=${vw}x${vh})`
+    );
   }
   const sx = vw / sw;
   const sy = vh / sh;

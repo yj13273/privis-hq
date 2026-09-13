@@ -21,6 +21,28 @@ export interface RouterOptions {
  * Validates that the package is properly sanitized before transmitting over the network.
  * Throws if raw data, missing fields, or unredacted PII patterns are found.
  */
+function findPiiPath(value: unknown, path = "package"): { name: string; path: string } | null {
+  if (typeof value === "string") {
+    for (const { name, re } of PII_PATTERNS) {
+      re.lastIndex = 0;
+      if (re.test(value)) return { name, path };
+    }
+    return null;
+  }
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      const found = findPiiPath(value[i], `${path}[${i}]`);
+      if (found) return found;
+    }
+  } else if (value && typeof value === "object") {
+    for (const [key, nested] of Object.entries(value)) {
+      const found = findPiiPath(nested, `${path}.${key}`);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
 export function assertSanitizedPackage(pkg: SanitizedPackage): void {
   if (!pkg || typeof pkg !== "object") {
     throw new Error("Invalid package: expected a non-null object");
@@ -75,18 +97,16 @@ export function assertSanitizedPackage(pkg: SanitizedPackage): void {
   }
 
   // Scan full serialized payload to ensure no raw PII leaks across the wire
-  const serialized = JSON.stringify({
+  const leak = findPiiPath({
     goal: pkg.goal,
-    ...pkg.sanitizedContext,
+    sanitizedContext: pkg.sanitizedContext,
     plannerContext: pkg.plannerContext,
   });
-
-  for (const { name, re } of PII_PATTERNS) {
-    if (re.test(serialized)) {
-      throw new Error(
-        `Refusing to route: ${name} pattern detected in sanitized package — Sanitizer leaked`
-      );
-    }
+  if (leak) {
+    // Never include the matching value: this error can enter UI/history.
+    throw new Error(
+      `Refusing to route: ${leak.name} pattern detected in sanitized package at ${leak.path} — Sanitizer leaked`
+    );
   }
 }
 

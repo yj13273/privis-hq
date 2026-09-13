@@ -25,7 +25,7 @@ const CONFIDENCE_HIT = 0.95;
 const CONFIDENCE_LABEL = 0.7;
 
 const PAN_RE = /[A-Z]{5}[0-9]{4}[A-Z]/;
-const EMAIL_RE = /^[\w.+-]+@[\w-]+(\.[\w-]+)+$/;
+const EMAIL_RE = /\b[\w.+-]+@[\w-]+(?:\.[\w-]+)+\b/;
 // Indian mobile: optional +91 country code, starts 6-9, 10 digits total.
 const PHONE_RE = /^(\+91)?[6-9][0-9]{9}$/;
 // Currency symbol / currency unit in value text.
@@ -148,8 +148,14 @@ export function applyPlaceholders(
         // Face is redacted as pixels only; never placeholder-swapped or text-blanked.
         out = el;
       } else {
-        map[el.element_id] = el.text; // real value stays local, never sent to remote
-        out = { ...el, text: tokenFor(d.category, el.text) };
+        // A Gmail recipient chip can expose "Name <person@example.com>".
+        // Replace only the sensitive substring so the planner retains useful
+        // context, while the local map holds only the value a type action may use.
+        const match = d.category === "EMAIL" ? text.match(EMAIL_RE)?.[0] : undefined;
+        const value = match ?? el.text;
+        const token = tokenFor(d.category, value);
+        map[el.element_id] = value; // real value stays local, never sent to remote
+        out = { ...el, text: match ? el.text.replace(match, token) : token };
       }
     }
     sanitized.push(out);

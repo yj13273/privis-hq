@@ -62,6 +62,7 @@ export type ActionErrorCode =
   | "UNSUPPORTED_CONTROL"
   | "TIMEOUT"
   | "INVALID_ACTION"
+  | "DUPLICATE_ACTION"
   | "POLICY_BLOCKED"
   | "EXECUTION_ERROR";
 

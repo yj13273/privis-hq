@@ -41,6 +41,18 @@ export interface ListTabsAction {
   type: "list_tabs";
 }
 
+export type BatchableAction =
+  | ClickAction
+  | TypeAction
+  | PressKeyAction
+  | TargetAction
+  | SelectOptionAction;
+
+export interface BatchAction {
+  type: "batch";
+  actions: BatchableAction[];
+}
+
 export interface ClickAction {
   type: "click";
   target: Target;
@@ -137,6 +149,7 @@ export type AgentAction =
   | SwitchTabAction
   | CloseTabAction
   | ListTabsAction
+  | BatchAction
   | ClickAction
   | TypeAction
   | ScrollAction
@@ -174,6 +187,8 @@ export interface AgentSession {
   /** Redacted state/action fingerprints used to stop blind identical retries. */
   lastFailureFingerprint?: string;
   lastFailureAction?: string;
+  /** Successful local interactions, normalized without snapshot versions. */
+  successfulActionFingerprints?: string[];
   /** Exact redacted-only package view dispatched to the remote planner. */
   outboundPayload?: {
     sanitizedScreenshot: string;

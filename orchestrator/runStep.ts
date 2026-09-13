@@ -86,34 +86,111 @@ function domPackage(tabId: number, frameId = 0): Promise<CaptureResponseMessage>
 }
 
 async function domPackages(tabId: number): Promise<CaptureResponseMessage[]> {
-  const packages = await Promise.all((await frameIds(tabId)).map((frameId) => domPackage(tabId, frameId)));
-  return packages.filter((pkg) => pkg.payload.elements.length > 0 || pkg.payload.frameId === 0);
+  const ids = await frameIds(tabId);
+  const results = await Promise.allSettled(ids.map((frameId) => domPackage(tabId, frameId)));
+  const packages = results
+    .filter((r): r is PromiseFulfilledResult<CaptureResponseMessage> => r.status === "fulfilled")
+    .map((r) => r.value)
+    .filter((pkg) => pkg.payload.elements.length > 0 || pkg.payload.frameId === 0);
+  return packages;
 }
 
-// Cheap, deterministic fingerprint of the DOM package. Element ids are stable
-// across extractions (the content script keys them by DOM node), so equality
-// here means the page did not change between snapshots.
-function packageFingerprint(packages: CaptureResponseMessage[]): string {
-  return JSON.stringify(packages.map(({ payload }) => ({
-    browserState: payload.browserState,
-    elements: payload.elements.map(({ snapshotVersion: _snapshotVersion, ...element }) => element),
-  })));
+// Gmail changes inbox/sidebar ARIA state continuously. A full-DOM equality
+// check therefore rejects a stable compose form. Keep the invariant that
+// redaction regions and executable form controls did not move/change, while
+// ignoring volatile navigation chrome (focus, expansion, link counts, title).
+export function captureStabilityFingerprint(packages: CaptureResponseMessage[]): string {
+  const isActionable = (element: ElementMeta) =>
+    ["input", "textarea", "select", "button"].includes(element.tag) ||
+    ["textbox", "combobox", "checkbox", "radio", "button"].includes(element.role ?? "");
+  return JSON.stringify(
+    packages
+      .map(({ payload }) => {
+        const elements = payload.elements;
+        return {
+          frameId: payload.frameId ?? 0,
+          documentId: payload.documentId,
+          url: payload.browserState.url,
+          viewport: payload.browserState.viewport,
+          actionable: elements
+            .filter(isActionable)
+            .map(({ element_id, tag, type, role, text, bbox, documentId, frameId }) =>
+              ({ element_id, tag, type, role, text, bbox, documentId, frameId }))
+            .sort((a, b) => a.element_id.localeCompare(b.element_id)),
+          sensitive: detectSensitive(elements)
+            .map(({ element_id, category, bbox }) => ({ element_id, category, bbox }))
+            .sort((a, b) => `${a.element_id}:${a.category}`.localeCompare(`${b.element_id}:${b.category}`)),
+        };
+      })
+      .sort((a, b) => a.frameId - b.frameId)
+  );
+}
+
+async function waitForStableDom(
+  tabId: number,
+  intervalMs = 150,
+  maxPolls = 10
+): Promise<CaptureResponseMessage[] | null> {
+  let previous = await domPackages(tabId);
+  for (let poll = 0; poll < maxPolls; poll++) {
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    const current = await domPackages(tabId);
+    if (captureStabilityFingerprint(previous) === captureStabilityFingerprint(current)) {
+      return current;
+    }
+    previous = current;
+  }
+  return null;
 }
 
 export async function capturePackage(tabId: number): Promise<CapturePackage> {
+  // Capture DOM after making the same tab visible that captureVisibleTab will
+  // screenshot. Otherwise an inactive/recently-switched tab can report a zero
+  // viewport while the screenshot is valid.
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (!tab.active) {
+      await chrome.tabs.update(tabId, { active: true });
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    }
+  } catch {
+    // The subsequent DOM/screenshot calls produce the useful failure.
+  }
   const MAX_TRIES = 3;
+  let sawUnstableDom = false;
   for (let attempt = 0; attempt < MAX_TRIES; attempt++) {
     // Snapshot the DOM first, capture the screenshot of that same state, then
     // re-snapshot the DOM and require it to be unchanged. This guarantees the
     // detections always describe the pixels we redact — never detections from
     // one page state applied to another state's screenshot.
-    const before = await domPackages(tabId);
+    // SPAs such as Zepto continue rendering product cards after Enter. Wait
+    // for two identical safety-relevant DOM samples before taking the costly
+    // screenshot; retrying only after a screenshot is too late and repeatedly
+    // races the same render wave.
+    const before = await waitForStableDom(tabId);
+    if (!before) {
+      sawUnstableDom = true;
+      continue;
+    }
     const { dataUrl } = await takeScreenshot(tabId);
     const after = await domPackages(tabId);
-    if (packageFingerprint(before) === packageFingerprint(after)) {
-      const primary = before.find((pkg) => pkg.payload.frameId === 0) ?? before[0];
+    if (captureStabilityFingerprint(before) === captureStabilityFingerprint(after)) {
+      const primary = before.find((pkg) => (pkg.payload.frameId ?? 0) === 0);
       const elements = before.flatMap((pkg) => pkg.payload.elements);
       if (!primary) throw new Error("capturePackage: top-level frame is unavailable");
+      // Guard: iframes can report zero viewport; always use the top frame's
+      // viewport for fusion. If even frame 0 reports zero (minimised tab,
+      // restricted page), fall back to the screenshot dimensions later.
+      const viewport = primary.payload.browserState.viewport;
+      if (viewport.w <= 0 || viewport.h <= 0) {
+        // Estimate from screenshot: data URL → base64 PNG header contains IHDR
+        // with width/height, but decoding is expensive. Instead, retry — the
+        // tab was just activated above, so transient zero should resolve.
+        if (attempt < MAX_TRIES - 1) continue;
+        throw new Error(
+          `capturePackage: viewport is ${viewport.w}x${viewport.h} after ${MAX_TRIES} attempts — tab may be minimised or restricted`
+        );
+      }
       return {
         tabId,
         dataUrl,
@@ -126,7 +203,9 @@ export async function capturePackage(tabId: number): Promise<CapturePackage> {
     }
   }
   throw new Error(
-    "capturePackage: page state kept changing between DOM snapshot and screenshot"
+    sawUnstableDom
+      ? "capturePackage: page did not reach a stable actionable state; wait for the SPA results to finish loading and retry"
+      : "capturePackage: actionable state changed between DOM snapshot and screenshot"
   );
 }
 
@@ -204,6 +283,24 @@ function sanitizedStateFingerprint(pkg: CapturePackage, elements: ElementMeta[])
     elements: elements.map(({ element_id, tag, type, role, label, text, bbox }) => ({
       element_id, tag, type, role, label, text, bbox,
     })),
+  });
+}
+
+export function successfulActionFingerprint(action: AgentAction): string | null {
+  if (
+    !["click", "type", "select_option", "check", "uncheck"].includes(action.type) ||
+    !("target" in action)
+  ) return null;
+  const target = action.target;
+  if (!target) return null;
+  const locator = target.ref
+    ? { documentId: target.ref.documentId, frameId: target.ref.frameId ?? 0, elementId: target.ref.elementId }
+    : { css: target.css, role: target.role, name: target.name, bbox: target.bbox };
+  return JSON.stringify({
+    type: action.type,
+    target: locator,
+    ...(action.type === "type" ? { placeholder: action.placeholder } : {}),
+    ...(action.type === "select_option" ? { option: action.option } : {}),
   });
 }
 
@@ -406,7 +503,16 @@ async function runOneStep(session: AgentSession): Promise<Outcome> {
   // placeholder / title) to keep any raw value out of the remote context.
   // Privacy-first: NO LLM keys on this device — the package goes to the
   // operator's remote-agent server, which holds the keys and picks the brain.
-  const remoteElements: ElementMeta[] = sanitized.map((el) => ({ ...el, label: null }));
+  const remoteElements: ElementMeta[] = sanitized.map((el) => ({
+    ...el,
+    text: redactPii(el.text),
+    label: null,
+  }));
+  const remoteBrowserState = {
+    ...pkg.browserState,
+    url: redactPii(pkg.browserState.url),
+    title: redactPii(pkg.browserState.title),
+  };
   const settings = await loadModelSettings();
   session.outboundPayload = {
     sanitizedScreenshot,
@@ -414,15 +520,19 @@ async function runOneStep(session: AgentSession): Promise<Outcome> {
     placeholders: remoteElements
       .map((element) => element.text)
       .filter((text) => /^[A-Z]+_\d+$/.test(text)),
-    url: pkg.browserState.url,
+    url: remoteBrowserState.url,
     model: settings.model,
   };
   notifySessionUpdate(session, gate);
 
+  // The goal is user-controlled text too. Keep the full goal on-device, but
+  // redact PII before the planner sees it; sensitive form values are available
+  // remotely only as sanitizer-issued placeholders.
+  const remoteGoal = redactPii(goal);
   const outboundPkg = {
-    goal,
+    goal: remoteGoal,
     sanitizedScreenshot,
-    sanitizedContext: { elements: remoteElements, browserState: pkg.browserState },
+    sanitizedContext: { elements: remoteElements, browserState: remoteBrowserState },
     plannerContext: buildPlannerContext(session),
     redacted: true as const, // sanitizer provenance: structural + visual redaction applied above
   };
@@ -509,6 +619,28 @@ async function runOneStep(session: AgentSession): Promise<Outcome> {
     return { decision: gate.decision, reason, stop: true };
   }
 
+  const actionFingerprint = successfulActionFingerprint(agentAction);
+  if (actionFingerprint && session.successfulActionFingerprints?.includes(actionFingerprint)) {
+    const result: ActionResult = {
+      ok: false,
+      code: "DUPLICATE_ACTION",
+      error: "This exact interaction already succeeded in this session; choose the next requested item or verify completion.",
+    };
+    session.history.push({
+      step: session.history.length + 1,
+      url: pkg.browserState.url,
+      action: agentAction,
+      result,
+      timestamp: Date.now(),
+    });
+    session.step = session.history.length;
+    session.lastFailureFingerprint = currentStateFingerprint;
+    session.lastFailureAction = JSON.stringify(agentAction);
+    broadcastHudStep(6, { actions: [], results: [result], outcome: "retry" });
+    notifySessionUpdate(session, gate);
+    return { decision: gate.decision, reason: result.error!, actions: [result] };
+  }
+
   // Terminal actions: done is terminal only after its optional configured
   // verification passes. A failed verification becomes planner feedback.
   if (agentAction.type === "done" || agentAction.type === "ask_human") {
@@ -546,6 +678,39 @@ async function runOneStep(session: AgentSession): Promise<Outcome> {
     broadcastHudStep(6, { actions: [], results: [result] });
     notifySessionUpdate(session, gate);
     return { decision: gate.decision, reason: gate.reason, stop: true };
+  }
+
+  if (agentAction.type === "batch") {
+    const actions = agentAction.actions.flatMap((subAction) =>
+      agentActionToExecutorActions(subAction, sanitized, map, goal)
+    );
+    const frameId = agentAction.actions[0]?.target.ref?.frameId ?? 0;
+    const results = await applyActions(tabId, actions, frameId);
+    const failed = results.find((result) => !result.ok);
+    const aggregate: ActionResult = {
+      ok: !failed && results.length === actions.length,
+      ...(failed?.error ? { error: failed.error } : {}),
+      detail: JSON.stringify(results),
+    };
+    session.history.push({
+      step: session.history.length + 1,
+      url: pkg.browserState.url,
+      action: agentAction,
+      result: aggregate,
+      timestamp: Date.now(),
+    });
+    session.step = session.history.length;
+    if (!aggregate.ok) {
+      session.lastFailureFingerprint = currentStateFingerprint;
+      session.lastFailureAction = JSON.stringify(agentAction);
+    } else {
+      delete session.lastFailureFingerprint;
+      delete session.lastFailureAction;
+    }
+    broadcastHudStep(6, { actions, results, outcome: aggregate.ok ? "ok" : "failure" });
+    notifySessionUpdate(session, gate);
+    await waitForTabSettled(tabId);
+    return { decision: gate.decision, reason: gate.reason, actions: results };
   }
 
   // Browser-context actions run in the background because content scripts do
@@ -689,6 +854,10 @@ async function runOneStep(session: AgentSession): Promise<Outcome> {
   } else {
     delete session.lastFailureFingerprint;
     delete session.lastFailureAction;
+    if (actionFingerprint) {
+      const fingerprints = session.successfulActionFingerprints ??= [];
+      if (!fingerprints.includes(actionFingerprint)) fingerprints.push(actionFingerprint);
+    }
   }
   broadcastHudStep(6, {
     actions,
