@@ -32,8 +32,6 @@ export interface ElementMeta {
   text: string;
   bbox: BoundingBox;
   snapshotVersion?: number;
-  documentId?: string;
-  frameId?: number;
   disabled?: boolean;
   checked?: boolean;
   selected?: boolean;
@@ -62,7 +60,6 @@ export type ActionErrorCode =
   | "UNSUPPORTED_CONTROL"
   | "TIMEOUT"
   | "INVALID_ACTION"
-  | "POLICY_BLOCKED"
   | "EXECUTION_ERROR";
 
 export interface Action {
@@ -81,7 +78,6 @@ export interface ActionResult {
   ok: boolean;
   error?: string;
   code?: ActionErrorCode;
-  detail?: string;
 }
 
 export type PolicyGateDecision = "allow" | "human_approval" | "block";
@@ -98,7 +94,6 @@ export interface CapturePackage {
   detections: Detection[];
   browserState: BrowserState;
   snapshotVersion?: number;
-  documentId?: string;
 }
 
 export interface SanitizedContext {
@@ -145,7 +140,6 @@ export interface StepResult {
 
 export interface CaptureRequestMessage {
   type: "capture.request";
-  frameId?: number;
 }
 
 export interface CaptureResponseMessage {
@@ -154,8 +148,6 @@ export interface CaptureResponseMessage {
     elements: ElementMeta[];
     browserState: BrowserState;
     snapshotVersion?: number;
-    documentId?: string;
-    frameId?: number;
   };
 }
 

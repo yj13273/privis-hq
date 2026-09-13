@@ -18,7 +18,6 @@
 
 import type {
   Action,
-  ActionResult,
   AgentAction,
   AgentSession,
   CapturePackage,
@@ -41,15 +40,7 @@ import { queryServer, serverOptionsFromSettings } from "../remote-agent/client-s
 import { agentActionToExecutorActions } from "../executor/agent-action.js";
 import { redactPii } from "../remote-agent/guard.js";
 import { applyActions } from "../executor/local-executor.js";
-import {
-  navigateTab,
-  waitForTabTransition,
-  openTab,
-  switchTab,
-  closeTab,
-  listTabs,
-  tabIdForRef,
-} from "../executor/navigate.js";
+import { navigateTab, waitForTabTransition } from "../executor/navigate.js";
 import { runVisionPath } from "../privacy/engine/vision/face-pipeline.js";
 import {
   notifySessionUpdate,
@@ -71,33 +62,15 @@ import {
  * @param tabId Target tab ID
  */
 // Snapshot the content-script DOM package for a tab.
-async function frameIds(tabId: number): Promise<number[]> {
-  try {
-    const frames = await chrome.webNavigation?.getAllFrames?.({ tabId });
-    const ids = frames?.map((frame) => frame.frameId).filter((id): id is number => typeof id === "number");
-    return ids?.length ? ids : [0];
-  } catch {
-    return [0];
-  }
-}
-
-function domPackage(tabId: number, frameId = 0): Promise<CaptureResponseMessage> {
-  return sendToContent<CaptureResponseMessage>(tabId, { type: "capture.request", frameId }, frameId);
-}
-
-async function domPackages(tabId: number): Promise<CaptureResponseMessage[]> {
-  const packages = await Promise.all((await frameIds(tabId)).map((frameId) => domPackage(tabId, frameId)));
-  return packages.filter((pkg) => pkg.payload.elements.length > 0 || pkg.payload.frameId === 0);
+function domPackage(tabId: number): Promise<CaptureResponseMessage> {
+  return sendToContent<CaptureResponseMessage>(tabId, { type: "capture.request" });
 }
 
 // Cheap, deterministic fingerprint of the DOM package. Element ids are stable
 // across extractions (the content script keys them by DOM node), so equality
 // here means the page did not change between snapshots.
-function packageFingerprint(packages: CaptureResponseMessage[]): string {
-  return JSON.stringify(packages.map(({ payload }) => ({
-    browserState: payload.browserState,
-    elements: payload.elements.map(({ snapshotVersion: _snapshotVersion, ...element }) => element),
-  })));
+function packageFingerprint(dom: CaptureResponseMessage): string {
+  return JSON.stringify(dom.payload);
 }
 
 export async function capturePackage(tabId: number): Promise<CapturePackage> {
@@ -107,21 +80,18 @@ export async function capturePackage(tabId: number): Promise<CapturePackage> {
     // re-snapshot the DOM and require it to be unchanged. This guarantees the
     // detections always describe the pixels we redact — never detections from
     // one page state applied to another state's screenshot.
-    const before = await domPackages(tabId);
+    const before = await domPackage(tabId);
     const { dataUrl } = await takeScreenshot(tabId);
-    const after = await domPackages(tabId);
+    const after = await domPackage(tabId);
     if (packageFingerprint(before) === packageFingerprint(after)) {
-      const primary = before.find((pkg) => pkg.payload.frameId === 0) ?? before[0];
-      const elements = before.flatMap((pkg) => pkg.payload.elements);
-      if (!primary) throw new Error("capturePackage: top-level frame is unavailable");
+      const { elements, browserState } = before.payload;
       return {
         tabId,
         dataUrl,
         elements,
         detections: detectSensitive(elements),
-        browserState: primary.payload.browserState,
-        snapshotVersion: primary.payload.snapshotVersion,
-        documentId: primary.payload.documentId,
+        browserState,
+        snapshotVersion: before.payload.snapshotVersion,
       };
     }
   }
@@ -138,7 +108,6 @@ function buildPlannerContext(session: AgentSession): PlannerContext {
           ok: step.result.ok,
           ...(step.result.code ? { code: step.result.code } : {}),
           ...(step.result.error ? { error: redactPii(step.result.error) } : {}),
-          ...(step.result.detail ? { detail: redactPii(step.result.detail) } : {}),
         }
       : undefined,
   }));
@@ -207,25 +176,17 @@ function sanitizedStateFingerprint(pkg: CapturePackage, elements: ElementMeta[])
   });
 }
 
-function verificationActions(
-  verify: DoneVerification,
-  sanitized: ElementMeta[],
-  map: Record<string, string>,
-  goal: string
-): Action[] {
-  return agentActionToExecutorActions(
-    {
-      type: "wait_for",
-      condition: verify.condition,
-      ...(verify.target ? { target: verify.target } : {}),
-      ...(verify.needle ? { needle: verify.needle } : {}),
-      ...(verify.urlPattern ? { urlPattern: verify.urlPattern } : {}),
-      timeoutMs: verify.timeoutMs,
-    },
-    sanitized,
-    map,
-    goal
-  );
+function verificationAction(verify: DoneVerification): Action {
+  return {
+    type: "wait_for",
+    target: "",
+    condition: verify.condition,
+    ...(verify.target ? { targetLocator: verify.target } : {}),
+    ...(verify.needle ?? verify.urlPattern
+      ? { value: verify.needle ?? verify.urlPattern }
+      : {}),
+    timeoutMs: verify.timeoutMs,
+  };
 }
 
 /**
@@ -514,11 +475,7 @@ async function runOneStep(session: AgentSession): Promise<Outcome> {
   if (agentAction.type === "done" || agentAction.type === "ask_human") {
     let result = { ok: true } as import("../types/index.js").ActionResult;
     if (agentAction.type === "done" && agentAction.verify) {
-      result = (await applyActions(
-        tabId,
-        verificationActions(agentAction.verify, sanitized, map, goal),
-        agentAction.verify.target?.ref?.frameId ?? 0
-      ))[0] ?? {
+      result = (await applyActions(tabId, [verificationAction(agentAction.verify)]))[0] ?? {
         ok: false,
         code: "EXECUTION_ERROR",
         error: "Completion verification returned no result",
@@ -546,50 +503,6 @@ async function runOneStep(session: AgentSession): Promise<Outcome> {
     broadcastHudStep(6, { actions: [], results: [result] });
     notifySessionUpdate(session, gate);
     return { decision: gate.decision, reason: gate.reason, stop: true };
-  }
-
-  // Browser-context actions run in the background because content scripts do
-  // not have tabs access. A context change always loops into a fresh capture.
-  if (agentAction.type === "open_tab" || agentAction.type === "switch_tab" || agentAction.type === "close_tab" || agentAction.type === "list_tabs") {
-    let result: ActionResult;
-    let nextTabId: number | undefined;
-    if (agentAction.type === "open_tab") {
-      const opened = await openTab(agentAction.url);
-      result = opened.result;
-      nextTabId = opened.tabId;
-    } else if (agentAction.type === "switch_tab") {
-      nextTabId = tabIdForRef(agentAction.tabRef);
-      result = nextTabId === undefined
-        ? { ok: false, code: "EXECUTION_ERROR", error: "Unknown tab reference" }
-        : await switchTab(nextTabId);
-    } else if (agentAction.type === "close_tab") {
-      const target = agentAction.tabRef ? tabIdForRef(agentAction.tabRef) : tabId;
-      if (target === undefined) {
-        result = { ok: false, code: "EXECUTION_ERROR", error: "Unknown tab reference" };
-      } else {
-        result = await closeTab(target);
-      }
-      if (result.ok && target === tabId) {
-        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-        nextTabId = tabs[0]?.id;
-      }
-    } else {
-      result = await listTabs();
-    }
-    if (result.ok && nextTabId !== undefined) {
-      session.tabId = nextTabId;
-    }
-    session.history.push({ step: session.history.length + 1, url: pkg.browserState.url, action: agentAction, result, timestamp: Date.now() });
-    session.step = session.history.length;
-    if (!result.ok || ((agentAction.type === "open_tab" || agentAction.type === "switch_tab" || agentAction.type === "close_tab") && nextTabId === undefined)) {
-      session.status = "error";
-      session.error = result.error ?? "Browser context action did not produce a usable tab";
-      notifySessionUpdate(session, gate);
-      return { decision: gate.decision, reason: session.error, stop: true };
-    }
-    broadcastHudStep(6, { actions: [], results: [result], contextChanged: agentAction.type !== "list_tabs" });
-    notifySessionUpdate(session, gate);
-    return { decision: gate.decision, reason: gate.reason };
   }
 
   // CBA-5: navigate cannot run in the content-script executor (no chrome.tabs
@@ -662,9 +575,7 @@ async function runOneStep(session: AgentSession): Promise<Outcome> {
   const navigationWait = historyKind
     ? waitForTabTransition(tabId, pkg.browserState.url, historyKind)
     : undefined;
-  const actionTarget = "target" in agentAction ? agentAction.target : undefined;
-  const frameId = actionTarget?.ref?.frameId ?? 0;
-  const results = await applyActions(tabId, actions, frameId);
+  const results = await applyActions(tabId, actions);
   if (navigationWait) {
     if (results[0]?.ok) {
       const transition = await navigationWait.promise;

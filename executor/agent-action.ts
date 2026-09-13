@@ -59,10 +59,7 @@ function resolveTarget(
   if (target?.ref) {
     const ref = target.ref;
     return sanitized.find((el) =>
-      el.snapshotVersion === ref.snapshotVersion &&
-      el.documentId === ref.documentId &&
-      (ref.frameId === undefined || el.frameId === ref.frameId) &&
-      el.element_id === ref.elementId
+      el.snapshotVersion === ref.snapshotVersion && el.element_id === ref.elementId
     );
   }
   if (typeof target?.css === "string" && target.css.trim()) return undefined; // css used directly
@@ -148,7 +145,13 @@ export function agentActionToExecutorActions(
       return [{ type: action.type, target: "" }];
     case "click": {
       const t = action.target;
-      const css = cssTarget(t, sanitized);
+      const css =
+        typeof t?.css === "string" && t.css.trim()
+          ? t.css.trim()
+          : (() => {
+              const css = cssTarget(t, sanitized);
+              return css;
+            })();
       // Unresolvable click must surface as a FAILURE, not a silent no-op —
       // callers must not record it as ok (runStep turns this into ok:false).
       if (!css)

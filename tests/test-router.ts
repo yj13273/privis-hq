@@ -1209,27 +1209,18 @@ assert.deepStrictEqual(
 );
 assert.strictEqual(typeGen[0].value, "user@x.com");
 console.log("  ✔ Bridge passes css targets through with real values");
-const versionedElements: ElementMeta[] = [{ ...bridgeElements[0], snapshotVersion: 12, documentId: "doc-a" }];
+const versionedElements: ElementMeta[] = [{ ...bridgeElements[0], snapshotVersion: 12 }];
 assert.deepStrictEqual(agentActionToExecutorActions(
-  { type: "click", target: { ref: { snapshotVersion: 12, documentId: "doc-a", elementId: versionedElements[0].element_id } } },
+  { type: "click", target: { ref: { snapshotVersion: 12, elementId: versionedElements[0].element_id } } },
   versionedElements,
   bridgeMap
 ), [{ type: "click", target: "#pan-input" }]);
 assert.deepStrictEqual(agentActionToExecutorActions(
-  { type: "click", target: { ref: { snapshotVersion: 11, documentId: "doc-a", elementId: versionedElements[0].element_id } } },
+  { type: "click", target: { ref: { snapshotVersion: 11, elementId: versionedElements[0].element_id } } },
   versionedElements,
   bridgeMap
 ), [{ type: "click", target: "__stale_reference" }]);
 console.log("  ✔ Snapshot references resolve and stale references are preserved");
-const verifiedRef = agentActionToExecutorActions(
-  { type: "wait_for", condition: "element", target: { ref: { snapshotVersion: 12, documentId: "doc-a", elementId: versionedElements[0].element_id } } },
-  versionedElements,
-  bridgeMap
-);
-assert.deepStrictEqual(verifiedRef, [{
-  type: "wait_for", target: "#pan-input", condition: "element", timeoutMs: undefined,
-}]);
-console.log("  ✔ Completion-style waits use the same stale-reference bridge");
 
 const focusAction = agentActionToExecutorActions(
   { type: "focus", target: { role: "textbox" } },

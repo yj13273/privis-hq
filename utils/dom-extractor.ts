@@ -8,7 +8,7 @@
 import type { BrowserState, ElementMeta } from "../types/index.js";
 
 const INTERACTIVE_SELECTOR =
-  "a, input, textarea, select, button, img, [role], [contenteditable]";
+  "a, input, textarea, select, button, img, [role], [contenteditable='true']";
 
 // Stable per-element ids: an element keeps the same generated id across
 // repeated extractions within the page's lifetime.
@@ -93,23 +93,16 @@ export function labelFor(el: HTMLElement): string | null {
  * Extracts visible interactive elements, media, and form controls.
  */
 /** Resolves an in-memory generated id without mutating the page DOM. */
-function interactiveElements(root: ParentNode = document): HTMLElement[] {
-  const out: HTMLElement[] = [];
-  for (const el of root.querySelectorAll<HTMLElement>(INTERACTIVE_SELECTOR)) {
-    out.push(el);
-    if (el.shadowRoot) out.push(...interactiveElements(el.shadowRoot));
-  }
-  return out;
-}
-
 export function resolveGeneratedElement(id: string): HTMLElement | null {
-  return interactiveElements().find((el) => !el.id && elementId(el) === id) ?? null;
+  for (const el of document.querySelectorAll<HTMLElement>(INTERACTIVE_SELECTOR)) {
+    if (!el.id && elementId(el) === id) return el;
+  }
+  return null;
 }
 
-export function extractElements(snapshotVersion?: number, documentId?: string): ElementMeta[] {
+export function extractElements(snapshotVersion?: number): ElementMeta[] {
   const out: ElementMeta[] = [];
-  for (const el of interactiveElements()) {
-    if (el.hasAttribute("contenteditable") && !el.isContentEditable) continue;
+  for (const el of document.querySelectorAll<HTMLElement>(INTERACTIVE_SELECTOR)) {
     if (!isVisible(el)) continue;
     const id = elementId(el);
     const rect = el.getBoundingClientRect();
@@ -137,19 +130,12 @@ export function extractElements(snapshotVersion?: number, documentId?: string): 
       text,
       bbox: roundBBox(rect),
       ...(snapshotVersion !== undefined ? { snapshotVersion } : {}),
-      ...(documentId !== undefined ? { documentId } : {}),
-      disabled: ("disabled" in el && Boolean((el as HTMLInputElement).disabled)) || ariaDisabled(el),
+      disabled: "disabled" in el ? Boolean((el as HTMLInputElement).disabled) : ariaDisabled(el),
       ...(ariaChecked !== null || ["checkbox", "radio"].includes(input.type)
         ? { checked: ariaChecked !== null ? ariaChecked === "true" : input.checked }
         : {}),
-      ...(ariaSelected !== null || el.tagName === "OPTION" || el.tagName === "SELECT"
-        ? {
-            selected: ariaSelected !== null
-              ? ariaSelected === "true"
-              : el.tagName === "SELECT"
-                ? (el as HTMLSelectElement).selectedIndex >= 0
-                : (el as HTMLOptionElement).selected,
-          }
+      ...(ariaSelected !== null || el.tagName === "OPTION"
+        ? { selected: ariaSelected !== null ? ariaSelected === "true" : (el as HTMLOptionElement).selected }
         : {}),
       ...(ariaExpanded !== null ? { expanded: ariaExpanded === "true" } : {}),
       focused: document.activeElement === el,
